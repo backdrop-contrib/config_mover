@@ -1,0 +1,210 @@
+<?php
+/**
+ * @file Contains functions for the Config Mover module.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function config_mover_menu() {
+  $menu_items['admin/config/development/configuration/config_mover'] = array(
+    'title' => 'Config Mover',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('config_mover_form'),
+    'access arguments' => array('synchronize configuration'),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 10,
+  );
+
+  return $menu_items;
+}
+
+/**
+ * Form callback to create the main Config Mover page.
+ */
+function config_mover_form($form, &$form_state) {
+  backdrop_add_css(backdrop_get_path('module', 'config_mover') . '/config_mover.css');
+
+  // Get the currently active config storage class.
+  $current_config = settings_get('config_active_class', 'ConfigFileStorage');
+
+  // Get config list from the database.
+  $database_config_location = 'db://default/config_active';
+  $database_config_storage = new ConfigDatabaseStorage($database_config_location);
+  if (!$database_config_storage->isInitialized()) {
+    $database_config_storage->initializeStorage();
+  }
+  $database_config_files = $database_config_storage->listAll();
+
+  // Get config list from the filesystem.
+  $file_config_location = config_get_config_directory('active');
+  $file_config_storage = new ConfigFileStorage($file_config_location);
+  if (!$file_config_storage->isInitialized()) {
+    $file_config_storage->initializeStorage();
+  }
+  $file_config_files = $file_config_storage->listAll();
+
+  // Combine the lists so that we have 1 list of all files.
+  $all_config = array_unique(array_merge($file_config_files, $database_config_files));
+  sort($all_config);
+
+  // Check for config differences between the filesystem and the database.
+  $changed_config = [];
+  $formatter = new BackdropDiffFormatter();
+  foreach ($all_config as $config_name) {
+    $database_data = $database_config_storage->read($config_name);
+    if (empty($database_data)) {
+      $database_data = [];
+    }
+    $database_data = explode("\n", backdrop_json_encode($database_data, TRUE));
+
+    $file_data = $file_config_storage->read($config_name);
+    if (empty($database_data)) {
+      $database_data = [];
+    }
+    $file_data = explode("\n", backdrop_json_encode($file_data, TRUE));
+
+    if ($current_config == 'ConfigDatabaseStorage') {
+      $diff = new Diff($file_data, $database_data);
+    }
+    else {
+      $diff = new Diff($database_data, $file_data);
+    }
+    if (!$diff->isEmpty()) {
+      $changed_config[$config_name] = $formatter->format($diff);
+    }
+  }
+
+  // Create actions section.
+  $form['action_wrapper'] = [
+    '#type' => 'fieldset',
+    'current_config' => [
+      '#type' => 'markup',
+      '#prefix' => '<div class="current_config">',
+      '#suffix' => '</div>',
+      '#markup' => t('This site is currently using @class to store config.', [
+        '@class' => $current_config,
+      ]),
+    ],
+  ];
+  $form['action_wrapper']['actions'] = [
+    '#type' => 'container',
+    'database_to_files' => [
+      '#type' => 'submit',
+      '#value' => t('Move database config to the filesystem'),
+    ],
+    'files_to_database' => [
+      '#type' => 'submit',
+      '#value' => t('Move filesystem config to the database'),
+    ],
+  ];
+  if (empty($database_config_files)) {
+    // There is no config in the database.
+    $warning = t('There is no database config to be moved.');
+    $form['action_wrapper']['actions']['database_to_files']['#disabled'] = TRUE;
+  }
+  if (empty($file_config_files)) {
+    // There is no config in the filesystem.
+    $warning = t('There is no file config to be moved.');
+    $form['action_wrapper']['actions']['files_to_database']['#disabled'] = TRUE;
+  }
+  // Display a warning if 1 of the config sections is empty.
+  if (!empty($warning)) {
+    $form['action_wrapper']['warning'] = [
+      '#type' => 'markup',
+      '#prefix' => '<div class="warning">',
+      '#suffix' => '</div>',
+      '#markup' => $warning,
+    ];
+  }
+  // Display a message if the 2 locations are the same.
+  if (!empty($file_config_files) && !empty($database_config_files) && empty($changed_config)) {
+    $form['action_wrapper']['message'] = [
+      '#type' => 'markup',
+      '#prefix' => '<div class="message">',
+      '#suffix' => '</div>',
+      '#markup' => t('The database config and file config are identical.'),
+    ];
+  }
+
+  // If there are changes, format the preview.
+  if (!empty($changed_config)) {
+    $form['preview'] = [
+      '#type' => 'fieldset',
+    ];
+    foreach ($changed_config as $file_name => $config_diff) {
+      $form['preview'][$file_name] = [
+        '#type' => 'container',
+      ];
+      $form['preview'][$file_name]['label'] = [
+        '#markup' => '<h6>' . $file_name . '</h6>',
+      ];
+      $form['preview'][$file_name]['diff'] = [
+        'table' => [
+          '#theme' => 'table',
+          '#header' => array(
+            array(
+              'data' => t(($current_config == 'ConfigDatabaseStorage') ? 'Files' : 'Database'), 'colspan' => '2',
+              'class' => array('config-old'),
+            ),
+            array(
+              'data' => t(($current_config == 'ConfigDatabaseStorage') ? 'Database' : 'Files'), 'colspan' => '2',
+              'class' => array('config-new'),
+            ),
+          ),
+          '#attributes' => array('class' => array('diff-table')),
+          '#rows' => $config_diff,
+          '#sticky' => FALSE,
+        ],
+      ];
+    }
+  }
+
+  return $form;
+}
+
+/**
+ * Form sumbit handler to handle moving of config.
+ */
+function config_mover_form_submit($form, &$form_state) {
+  // Setup config storage objects.
+  $database_config_location = 'db://default/config_active';
+  $database_config_storage = new ConfigDatabaseStorage($database_config_location);
+  if (!$database_config_storage->isInitialized()) {
+    $database_config_storage->initializeStorage();
+  }
+  $file_config_location = config_get_config_directory('active');
+  $file_config_storage = new ConfigFileStorage($file_config_location);
+  if (!$file_config_storage->isInitialized()) {
+    $file_config_storage->initializeStorage();
+  }
+
+  if ($form_state['values']['op'] === $form_state['values']['files_to_database']) {
+    // Delete the existing config from the database.
+    $database_config_storage->deleteAll();
+
+    // Write the file config into the database.
+    $all_config = $file_config_storage->listAll();
+    foreach ($all_config as $config_name) {
+      $old_config = new Config($config_name, $file_config_storage);
+      $new_config = new Config($config_name, $database_config_storage);
+
+      $new_config->setData($old_config->getData());
+      $new_config->save();
+    }
+  }
+  if ($form_state['values']['op'] === $form_state['values']['database_to_files']) {
+    // Delete the existing config from the filesystem.
+    $file_config_storage->deleteAll();
+
+    // Write the database config to the filesystem.
+    $all_config = $database_config_storage->listAll();
+    foreach ($all_config as $config_name) {
+      $old_config = new Config($config_name, $database_config_storage);
+      $new_config = new Config($config_name, $file_config_storage);
+
+      $new_config->setData($old_config->getData());
+      $new_config->save();
+    }
+  }
+}
