@@ -2,3 +2,4 @@ type = module
 name = Config Mover
 description = A simple module to move config between different storage backends.
 backdrop = 1.x
+configure = admin/config/development/configuration/config_mover
