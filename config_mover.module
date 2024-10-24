@@ -82,7 +82,7 @@ function config_mover_form($form, &$form_state) {
       '#type' => 'markup',
       '#prefix' => '<div class="current_config">',
       '#suffix' => '</div>',
-      '#markup' => t('This site is currently using @class to store config.', [
+      '#markup' => t('This site is currently using @class to store the active configuration.', [
         '@class' => $current_config,
       ]),
     ],
@@ -91,39 +91,35 @@ function config_mover_form($form, &$form_state) {
     '#type' => 'container',
     'database_to_files' => [
       '#type' => 'submit',
-      '#value' => t('Move database config to the filesystem'),
+      '#value' => t('Move database configuration to the filesystem'),
     ],
     'files_to_database' => [
       '#type' => 'submit',
-      '#value' => t('Move filesystem config to the database'),
+      '#value' => t('Move filesystem configuration to the database'),
     ],
   ];
   if (empty($database_config_files)) {
     // There is no config in the database.
-    $warning = t('There is no database config to be moved.');
+    $message = t('There is no database configuration to be moved.');
     $form['action_wrapper']['actions']['database_to_files']['#disabled'] = TRUE;
   }
   if (empty($file_config_files)) {
     // There is no config in the filesystem.
-    $warning = t('There is no file config to be moved.');
+    $message = t('There is no file configuration to be moved.');
     $form['action_wrapper']['actions']['files_to_database']['#disabled'] = TRUE;
   }
-  // Display a warning if 1 of the config sections is empty.
-  if (!empty($warning)) {
-    $form['action_wrapper']['warning'] = [
-      '#type' => 'markup',
-      '#prefix' => '<div class="warning">',
-      '#suffix' => '</div>',
-      '#markup' => $warning,
-    ];
-  }
+
   // Display a message if the 2 locations are the same.
   if (!empty($file_config_files) && !empty($database_config_files) && empty($changed_config)) {
+    $message = t('The database config and file config are identical.');
+  }
+
+  if (!empty($message)) {
     $form['action_wrapper']['message'] = [
       '#type' => 'markup',
       '#prefix' => '<div class="message">',
       '#suffix' => '</div>',
-      '#markup' => t('The database config and file config are identical.'),
+      '#markup' => $message,
     ];
   }
 

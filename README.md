@@ -1,6 +1,6 @@
 #  Config Mover
 
-This module allows site admins to move config between different storage backends.
+This module allows site admins to move the active config between different storage backends. This does not do anything with your staging config.
 
 ## Installation
 
